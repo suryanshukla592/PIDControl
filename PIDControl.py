@@ -1,72 +1,72 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+# PID Controller Class
 class PIDController:
-    def __init__(self, kp=0.0, ki=0.0, kd=0.0):
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.integral = 0.0
+    def __init__(self, Kp, Ki, Kd):
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
         self.prev_error = 0
-    def compute(self, error, dt):
+        self.integral = 0
+    def control(self, error, dt):
         self.integral += error * dt
-        derivative = (error - self.prev_error) / dt if dt > 0 else 0.0
-        output = self.kp * error + self.ki * self.integral + self.kd * derivative
-        self.prev_error = error  
-        return output
-    def auto_tune(self, error, prev_error, dt):
-        change_error = error - prev_error
-        
-        if abs(change_error) > 0.1:  
-            self.kp += 0.001
-        if abs(change_error) > 0.5:  
-            self.kd += 1e-5
-        if abs(error) < 0.5 and abs(self.integral) > 1:  #
-            self.ki += 1e-5
-def move_bot(start, path_points, kp=0.0, ki=0.0, kd=0.0, dt=0.1):
-    x, y = start
-    path = [(x, y)]
-    theta = 0.0 
-    pid_bot = PIDController(kp, ki, kd)
-    prev_error = 0
-    for point in path_points:
-        while np.sqrt((point[0] - x) ** 2 + (point[1] - y) ** 2) > 0.1:
-            error = np.sqrt((point[0] - x) ** 2 + (point[1] - y) ** 2)
-            # Auto-tune PID
-            pid_bot.auto_tune(error, prev_error, dt)
-            prev_error = error  # Update prev_error
-            control_signal = pid_bot.compute(error, dt)
-            angle_deviation = np.arctan2((point[1] - y), (point[0] - x))
-            angle_error = angle_deviation - theta
-            theta += 0.5 * angle_error
-            x += control_signal * np.cos(theta) * dt
-            y += control_signal * np.sin(theta) * dt
-            path.append((x, y))
+        derivative = (error - self.prev_error) / dt if dt > 0 else 0
+        self.prev_error = error
+        return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+#Robot parameters
+wheel_radius = 0.05 
+distance_between_wheels = 0.2  
+max_wheel_angular_velocity = 8.0#cause of the hardware limits
+def differential_drive(v, w, dt, x, y, theta):
+    theta += w*dt
+    x += v*np.cos(theta)*dt
+    y += v*np.sin(theta)*dt
+    return x, y, theta
+#Waypoints to navigate
+waypoints = [(15, 7), (20, 40)]
+x, y, theta = 0, 0, 0  
+pid_linear = PIDController(Kp=0.7, Ki=0, Kd=0)
+dt=0.1
+trajectory = [(x, y)]
+ideal_path = [(0, 0)] + waypoints
+velocity = []
 
-    return path, pid_bot  
-
-# Define start point and waypoints
-start = (0, 0)
-path_points = [(47, 3), (17, 62)]
-kp, ki, kd = 0.0, 0.0, 0.0  
-actual_path, tuned_pid = move_bot(start, path_points, kp, ki, kd)
-actual_path = np.array(actual_path)
-
-plt.plot(actual_path[:, 0], actual_path[:, 1], label="PID Path", color="blue")
-ideal_x = [start[0]] + [p[0] for p in path_points]
-ideal_y = [start[1]] + [p[1] for p in path_points]
-plt.plot(ideal_x, ideal_y, 'k--', label="Ideal Path", linewidth=1.5)
-plt.scatter(*zip(*path_points), color='red', label="Waypoints")
-plt.scatter(*start, color='green', label="Start")
-
-# Display auto-tuned PID values
-pid_text = f"Kp = {tuned_pid.kp:.4f}\nKi = {tuned_pid.ki:.4f}\nKd = {tuned_pid.kd:.4f}"
-plt.text(min(actual_path[:, 0]), max(actual_path[:, 1]), pid_text, fontsize=12, color="blue",
-         verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
-
+for waypoint in waypoints:
+    target_x, target_y = waypoint
+    while np.hypot(target_x - x, target_y - y) > 0.05:
+        error_x = target_x - x
+        error_y = target_y - y
+        v = pid_linear.control(np.hypot(error_x, error_y), dt)
+        theta = np.arctan2(error_y, error_x)
+        w_l = (2*v - theta * distance_between_wheels) / (2 * wheel_radius)
+        w_r = (2*v + theta * distance_between_wheels) / (2 * wheel_radius)
+        w_l = np.clip(w_l, -max_wheel_angular_velocity, max_wheel_angular_velocity)#beacuse of probable hardware limits
+        w_r = np.clip(w_r, -max_wheel_angular_velocity, max_wheel_angular_velocity)
+        x, y, theta = differential_drive(v, theta, dt, x, y, theta)
+        trajectory.append((x, y))
+        velocity.append((v))
+#Plot the path
+trajectory = np.array(trajectory)
+ideal_path = np.array(ideal_path)
+plt.figure(figsize=(10, 5))
+plt.subplot(1, 2, 1)
+plt.plot(trajectory[:, 0], trajectory[:, 1], 'b-', label="Robot Path")
+plt.plot(ideal_path[:, 0], ideal_path[:, 1], 'g--', label="Ideal Path")
+plt.scatter(*zip(*waypoints), color='r', marker='x', label="Waypoints")
+plt.xlabel("X Position")
+plt.ylabel("Y Position")
 plt.legend()
-plt.xlabel("X")
-plt.ylabel("Y")
-plt.title("Auto-Tuning PID Bot Path")
+plt.title("PID-Controlled Robot Navigation")
 plt.grid()
+#Plot wheel velocities
+time_steps = np.arange(len(velocity))*dt
+plt.subplot(1, 2, 2)
+plt.plot(time_steps,velocity, 'r-', label="Velocity")
+plt.xlabel("Time (s)")
+plt.ylabel("Velocity (m/s)")
+plt.legend()
+plt.title("Velocity of Bot Over Time")
+plt.grid()
+plt.tight_layout()
 plt.show()
