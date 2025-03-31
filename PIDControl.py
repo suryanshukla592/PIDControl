@@ -59,7 +59,7 @@ plt.ylabel("Y Position")
 plt.legend()
 plt.title("PID-Controlled Robot Navigation")
 plt.grid()
-#Plot wheel velocities
+#Plot velocity
 time_steps = np.arange(len(velocity))*dt
 plt.subplot(1, 2, 2)
 plt.plot(time_steps,velocity, 'r-', label="Velocity")
